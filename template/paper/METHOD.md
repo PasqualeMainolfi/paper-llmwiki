@@ -72,11 +72,19 @@ There are **five** layers, each with a clear owner and a clear rotation speed:
 | **references** | LLM      | rarely    | citation metadata         |
 | **draft**      | human    | monthly   | how we tell the story     |
 
-`raw/` and `reading/` are both read-only inputs: one holds things *we*
-produced (experiments), the other holds things *others* produced and we
-consumed (papers, articles, reports). Keeping them separate keeps the
-provenance of every claim legible — did this number come from one of our
-runs or from a prior publication?
+`raw/` and `reading/` are both read-only inputs and are handled
+**symmetrically**. One holds things *we* produced (experiments), the other
+holds things *others* produced and we consumed (papers, articles, reports).
+Keeping them separate keeps the provenance of every claim legible — did
+this number come from one of our runs or from a prior publication?
+
+Symmetry rule: **any addition to `raw/` or `reading/` triggers the same
+fan-out** — create or update the wiki page(s) it feeds, update the
+corresponding `INDEX.md`, refresh obsidian links, append to `LOG.md`. A
+paper dropped into `reading/` is not inert: it is an input on equal footing
+with an experiment directory. See §6 for the two mirrored operations
+(`ingest-experiment`, `ingest-reference`) and the shared post-ingest
+checklist.
 
 ### Raw
 Your own experiment artifacts. Immutable from the LLM's point of view — it
@@ -237,6 +245,35 @@ The mandatory structure is what makes the wiki machine-navigable. Do not drop
 the required sections "just this once". If a page genuinely does not need one,
 write `—` under the heading so the shape is preserved.
 
+### 4.1 Link conventions (obsidian-style, non-negotiable)
+
+All internal links across the notebook use **obsidian wikilinks**, not
+Markdown `[text](path.md)`. This keeps Obsidian's graph view intact and lets
+the LLM rely on basename resolution during refactors.
+
+| link target                                | form                                             | example                                               |
+|--------------------------------------------|--------------------------------------------------|-------------------------------------------------------|
+| wiki page → another wiki page              | `[[basename]]`                                   | `[[complex_patch]]`                                   |
+| any page → a reading note                  | `[[reading/<bibkey>/notes\|<bibkey>]]`           | `[[reading/vinyard2025sparse/notes\|vinyard2025sparse]]` |
+| any page → the references index            | `[[references]]`                                 | `[[references]]`                                      |
+| reading/INDEX.md → its own notes           | `[[<bibkey>/notes\|notes]]`                      | `[[vinyard2025sparse/notes\|notes]]`                  |
+| references/INDEX.md → reading notes        | `[[reading/<bibkey>/notes\|notes]]`              | `[[reading/vinyard2025sparse/notes\|notes]]`          |
+| any page → raw artifact (dirs / binaries)  | backticks, plain path                            | `` `raw/codec_comparison/20260423_082024_full/` ``    |
+| any page → BibTeX file                     | Markdown link (not an obsidian-resolvable note)  | `` [`bibliography.bib`](bibliography.bib) ``          |
+
+Rules:
+- Use the `[[path|alias]]` pipe form for every cross-folder link so the
+  displayed text stays short while the path keeps the link unambiguous when
+  basenames collide (every reading dir has a `notes.md`; basename alone is
+  not unique).
+- Never link to `.md` files with Markdown `[text](path.md)`. That form is
+  reserved for non-note targets (e.g. `.bib`, external URLs).
+- Raw artifacts, code paths, and shell commands stay in backticks. They are
+  not notes; obsidian should not try to resolve them.
+- Every wiki page's `## Related` section includes at least one `[[link]]`
+  to a peer wiki page, one to `[[references]]` when the page cites prior
+  art, and one to each relevant `[[reading/<bibkey>/notes|<bibkey>]]`.
+
 ---
 
 ## 5. Folder layout
@@ -284,7 +321,32 @@ Naming conventions:
 
 ## 6. Operations
 
-Four operations cover almost everything the LLM needs to do.
+Four operations cover almost everything the LLM needs to do. `ingest-experiment`
+and `ingest-reference` are **mirrored**: same shape, same fan-out, different
+source-of-truth directory (`raw/` vs `reading/`).
+
+### Shared post-ingest fan-out (applies to both ingest ops)
+
+Whenever `raw/<topic>/<timestamp>_<slug>/` or `reading/<bibkey>/` gains
+content, the LLM runs this checklist before closing the operation:
+
+1. **Wiki.** Create or update every wiki page that depends on the new
+   material. Refresh `**Headline**`, `## Raw` (for experiments) or add
+   `[@bibkey]` citations (for references) backed by `reading/<bibkey>/notes.md`.
+2. **Supports line.** Each touched wiki page declares `**Supports.** Cn..`
+   tied to `FOCUS.md`. Raise any mismatch.
+3. **Obsidian links.** Add / refresh `[[basename]]` to peer wiki pages and
+   `[[reading/<bibkey>/notes|<bibkey>]]` to the underlying source notes,
+   following the conventions in §4.1.
+4. **Related section.** Every touched wiki page's `## Related` block
+   includes the new cross-links. No page ends up orphan or one-way-linked.
+5. **INDEX files.** Update `wiki/INDEX.md` (tick `[x]` when the page is
+   ready to quote) **and** whichever of `raw/` (if scripted) /
+   `reading/INDEX.md` / `references/INDEX.md` gained or lost a row.
+6. **LOG.md.** Append an entry: `## [YYYY-MM-DD HH:MM] <op> | <target>`
+   with a short body of what was touched.
+7. **Focus check.** Re-read `FOCUS.md` and confirm the change still maps
+   to the declared claims. On "maybe", raise to the human.
 
 ### Ingest experiment
 You finish a benchmark run. Raw artifacts land under
@@ -293,10 +355,7 @@ You finish a benchmark run. Raw artifacts land under
 1. Read the new raw artifacts (JSON / CSV / figures).
 2. Locate or create the wiki page that covers this topic.
 3. Update `**Headline**`, `## Raw`, `## Numbers`, `## Figures`, `## Caveats`.
-4. Touch `## Related` if this run opens / closes a cross-link with another
-   page.
-5. Tick the checkbox in `wiki/INDEX.md` when the page is ready to quote from.
-6. Append an entry to `LOG.md` (see §8).
+4. Run the **shared post-ingest fan-out** above.
 
 ### Ingest reference
 You read a paper you will cite. The LLM:
@@ -316,7 +375,7 @@ You read a paper you will cite. The LLM:
    unverified, tags it with `% TODO verify <field>` and leaves the entry
    marked unconfirmed.
 5. Adds the annotated row to `references/INDEX.md` (topic group, short
-   gloss, `cited in draft`, wiki anchor, `reading/<bibkey>/`).
+   gloss, `cited in draft`, wiki anchor, `[[reading/<bibkey>/notes|notes]]`).
 6. Adds an entry to `reading/INDEX.md` with the cite key, title, status
    (`to-read` / `reading` / `done`), and the `Cn` claims it touches.
 7. Updates any wiki page that gains a citation. Before attributing a claim
@@ -325,9 +384,8 @@ You read a paper you will cite. The LLM:
    memory alone.
 8. Flags contradictions: if the new paper undercuts a claim on an existing
    wiki page, notes it under `## Caveats` rather than silently rewriting.
-9. Checks that the citation's role maps to a claim in `FOCUS.md`. If not,
-   raises to the human before filing.
-10. Appends to `LOG.md`.
+9. Runs the **shared post-ingest fan-out** above (wiki links, INDEX files,
+   LOG, focus check).
 
 Source-integrity rule (applies across all operations): the LLM **never
 invents a citation**. If a claim needs a reference and none exists, it
@@ -349,7 +407,10 @@ When a draft section is due:
 ### Lint
 Periodically ask the LLM to health-check the wiki:
 
-- verify every `[[link]]` resolves to an existing wiki file;
+- verify every `[[link]]` resolves to an existing file (including
+  `[[reading/<bibkey>/notes]]` cross-folder links);
+- flag any Markdown-style `[text](path.md)` link to an internal note — all
+  internal links must be obsidian `[[wikilinks]]` per §4.1;
 - ensure every wiki page has all required sections;
 - ensure every wiki page declares which `FOCUS.md` claim(s) it supports;
 - detect orphan pages (no inbound `[[links]]`);
@@ -529,8 +590,15 @@ Rules:
      ## Caveats          (optional)
      ## Draft target     (required, "→ §X.Y …")
      ## Related          (required, at least two [[links]])
-3. Links between wiki pages use [[basename]]. Raw paths and code use
-   backticks. Cross-folder links use relative Markdown paths.
+3. Links use obsidian wikilinks, not Markdown [text](path.md):
+     - wiki ↔ wiki:                    [[basename]]
+     - wiki ↔ reading note:            [[reading/<bibkey>/notes|<bibkey>]]
+     - any page → references index:    [[references]]
+     - raw artifacts / code paths:     backticks, no link
+     - non-note targets (.bib, URLs):  Markdown link allowed
+   Every cross-folder [[link]] uses the pipe alias form so displayed text
+   stays short while the path keeps basename collisions unambiguous (every
+   reading/<bibkey>/ has a notes.md — basename alone is not unique).
 4. The draft may only quote numbers that already appear in a wiki page.
    If the draft needs a new number, update the wiki page first.
 5. Report losses and caveats, not only wins. Flag contradictions between
@@ -563,20 +631,32 @@ Source-integrity rules (non-negotiable):
     out-of-scope material, or contradict an earlier wiki page without
     resolution? Raise any "maybe" to the human before merging.
 
-Operations you will be asked to perform:
-- "ingest experiment <dir>" — read the raw artifacts, create or update the
-  matching wiki page (with the Supports line), tick INDEX, log.
+Operations you will be asked to perform. `ingest-experiment` and
+`ingest-reference` are mirrored: raw/ and reading/ are handled
+symmetrically, and both trigger the same post-ingest fan-out (wiki
+updates, obsidian links refreshed, INDEX files updated, LOG entry,
+focus check against FOCUS.md).
+
+- "ingest experiment <dir>" — read raw artifacts, create or update the
+  matching wiki page (with the Supports line), refresh obsidian [[links]]
+  and ## Related, tick wiki/INDEX, append to LOG, focus-check.
 - "ingest reference <citation>" — create reading/<bibkey>/ with source.pdf
   and a notes.md following the template, verify metadata, add BibTeX
   entry, update references/INDEX, update reading/INDEX, update wiki pages
-  that cite it (attribution only to claims recorded in notes.md), confirm
-  the role maps to a Cn in FOCUS.md, log.
+  that cite it (attribution only to claims recorded in notes.md; every
+  new citation backed by a [[reading/<bibkey>/notes|<bibkey>]] link in
+  ## Related), confirm the role maps to a Cn in FOCUS.md, append to LOG.
+- "ingest from reading" / "ingest from raw" — shorthand: any new content
+  under reading/ or raw/ that has not yet been fanned-out. Run the
+  corresponding ingest op on each pending item and report a summary.
 - "compose §X.Y" — open the wiki pages grouped under §X.Y in wiki/INDEX.md,
   confirm each supports a Cn, write the draft section by quoting their
   tables and citing by BibTeX key. Never introduce numbers not in the
   wiki. Never introduce citations not in bibliography.bib.
-- "lint" — walk the wiki, report broken [[links]], missing required
-  sections, missing Supports lines, orphans, contradictions, stale claims,
+- "lint" — walk the wiki, report broken [[links]] (including
+  cross-folder [[reading/<bibkey>/notes]]), any Markdown-style [text](x.md)
+  link to an internal note (obsidian-only rule), missing required sections,
+  missing Supports lines, orphans, contradictions, stale claims,
   bibliography gaps, [CITE?] markers, unverified BibTeX TODOs, Cn drift,
   BibTeX entries missing a reading/<bibkey>/notes.md, reading directories
   without a BibTeX entry or a notes.md.
